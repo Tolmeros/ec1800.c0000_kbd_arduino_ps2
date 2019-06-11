@@ -1,0 +1,1 @@
+# Replacement EC1840.C000 keyboard mcu. #
