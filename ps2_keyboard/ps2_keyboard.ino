@@ -1,6 +1,15 @@
-#include <ps2dev.h>
-#include <PS2KeyCode.h>
+#include <PinChangeInterrupt.h>
+#include <PinChangeInterruptBoards.h>
+#include <PinChangeInterruptPins.h>
+#include <PinChangeInterruptSettings.h>
+
+#define PS2DBG 1
+
+#include <ps2device.h>
+//#include <PS2KeyCode.h>
 //#include <PS2KeyTable.h>
+
+#include "scancodes.h"
 
 #define PS2_LED_SCROLL  B00000001
 #define PS2_LED_NUM     B00000010
@@ -29,10 +38,11 @@
 #define myCodeENTER 13
 #define myCodeBACKSPACE -2
 
-#define ps2device_data    A0
-#define ps2device_clock   A1
+#define ps2device_data  14  //A0 // PCINT8
+#define ps2device_clock 15  //A1 // PCINT9
+#define ps2device_clock_pcint 9
 
-PS2dev ps2kbd_dev(ps2device_clock, ps2device_data);
+PS2device ps2kbd_dev(ps2device_clock, ps2device_data);
 
 const char layout[6][16] = {
   {0,0,'1','2','3','4','5','6','7','8','9','0','-','=','\\',myCodeBACKSPACE},
@@ -43,25 +53,7 @@ const char layout[6][16] = {
   {}
 };
 
-const byte scancodes2[6][16] = {
-  {0, PS2_KC_ESC, PS2_KC_1, PS2_KC_2, PS2_KC_3, PS2_KC_4, PS2_KC_5, PS2_KC_6, 
-    PS2_KC_7, PS2_KC_8, PS2_KC_9, PS2_KC_0, PS2_KC_MINUS, PS2_KC_EQUAL, PS2_KC_BACK , PS2_KC_BS},
-    
-  {PS2_KC_TAB, PS2_KC_Q, PS2_KC_W, PS2_KC_E, PS2_KC_R, PS2_KC_T, PS2_KC_Y, PS2_KC_U, PS2_KC_I,
-   PS2_KC_O, PS2_KC_P, PS2_KC_OPEN_SQ, PS2_KC_CLOSE_SQ, PS2_KC_DIV, 0, PS2_KC_CTRL},
-   
-  {PS2_KC_A, PS2_KC_S, PS2_KC_D, PS2_KC_F, PS2_KC_G, PS2_KC_H, PS2_KC_J, PS2_KC_K, PS2_KC_L, PS2_KC_SEMI ,
-   PS2_KC_APOS,0,0, PS2_KC_ENTER, PS2_KC_ALT, PS2_KC_L_SHIFT },
-   
-  {PS2_KC_Z, PS2_KC_X, PS2_KC_C, PS2_KC_V, PS2_KC_B, PS2_KC_N, PS2_KC_M, PS2_KC_COMMA, PS2_KC_DOT, PS2_KC_SINGLE, 0, 0,
-   PS2_KC_R_SHIFT, PS2_KC_CAPS, PS2_KC_CAPS, 0},
-   
-  {0, PS2_KC_SPACE, 0, 0, PS2_KC_F1, PS2_KC_F2, PS2_KC_F3, PS2_KC_F4, PS2_KC_F5, PS2_KC_F6, PS2_KC_F7, PS2_KC_F8, PS2_KC_F9,
-   PS2_KC_F10, PS2_KC_NUM, 0},
-   
-  {PS2_KC_KP_MINUS, PS2_KC_KP7, PS2_KC_KP8, PS2_KC_KP9, PS2_KC_KP4, PS2_KC_KP5, PS2_KC_KP6, PS2_KC_KP1, PS2_KC_KP2, PS2_KC_KP3,
-   PS2_KC_KP0, PS2_KC_KP_DOT, PS2_KC_KP_PLUS}
-};
+
 
 byte kstate[6][16];
 
@@ -70,6 +62,8 @@ boolean ps2kbd_send_enabled = false;
 byte ScanCodeSet = 0x02;
 byte ps2Leds = 0x00;
 byte ps2Typematic =0x00;
+
+byte lastSentByte;
 
 void ack()
 {
@@ -92,6 +86,7 @@ int keyboardcommand(int command)
     break;
   case PS2_KC_RESEND:
     ack();
+    ps2kbd_dev.write(lastSentByte);
     break;
   case PS2_KC_DEFAULTS: //set defaults
     //enter stream mode
@@ -118,8 +113,10 @@ int keyboardcommand(int command)
   case PS2_KC_READID:
     ack();
     // MF2 keyboard
-    ps2kbd_dev.write(0xAB);
-    ps2kbd_dev.write(0x83);
+    lastSentByte = 0xAB;
+    ps2kbd_dev.write(lastSentByte);
+    lastSentByte = 0x83;
+    ps2kbd_dev.write(lastSentByte);
     Serial.println(F("PS/2 READID"));
     break;
   case PS2_KC_SCANCODE: //set/get scan code set
@@ -127,7 +124,8 @@ int keyboardcommand(int command)
     ps2kbd_dev.read(&val); //do nothing with the rate
     ack();
     if (val == 0) {
-      while(ps2kbd_dev.write(ScanCodeSet)!=0);
+      lastSentByte = ScanCodeSet;
+      while(ps2kbd_dev.write(lastSentByte)!=0);
       Serial.println(F("PS/2 GET SCANCODE"));
     } else {
       ScanCodeSet = val;
@@ -136,7 +134,8 @@ int keyboardcommand(int command)
     break;
   case PS2_KC_ECHO: //echo
     //ack();
-    ps2kbd_dev.write(PS2_KC_ECHO);
+    lastSentByte = PS2_KC_ECHO;
+    ps2kbd_dev.write(lastSentByte);
     Serial.println(F("PS/2 ECHO"));
     break;
   case PS2_KC_LOCK: //set/reset LEDs
@@ -156,8 +155,8 @@ int keyboardcommand(int command)
     Serial.println(F("PS/2 LOCK"));
     break;
    default:
-    ack();
-    //ps2kbd_dev.write(PS2_KC_RESEND);
+    //ack();
+    ps2kbd_dev.write(PS2_KC_RESEND);
     break;
   }
 }
@@ -167,8 +166,6 @@ void updateLeds() {
   digitalWrite(RusLed, ps2Leds & PS2_LED_SCROLL);
   digitalWrite(NumLockLed, ps2Leds & PS2_LED_NUM);
 }
-
-
 
 void setup() {
   // put your setup code here, to run once:
@@ -196,6 +193,45 @@ void setup() {
   while(ps2kbd_dev.write(0xAA)!=0);
   delay(10);
   ps2kbd_send_enabled = true;
+
+  attachPinChangeInterrupt(digitalPinToPinChangeInterrupt(ps2device_clock), ps2clk_isr, FALLING);
+  //attachPinChangeInterrupt(digitalPinToPinChangeInterrupt(ps2clk_isr), ps2device_clock, CHANGE); // Попробовать на LOW изменить
+  enablePCINT(digitalPinToPCINT(ps2device_clock));
+}
+
+void ps2clk_isr(void) {
+  // disable pcint
+    disablePCINT(digitalPinToPCINT(ps2device_clock));
+  unsigned char c;
+  char result;
+  //Serial.println(F("ps2clk_isr"));
+  /*
+  if (digitalRead(ps2device_clock)==LOW) {
+  */  
+
+    //Serial.println(F("ps2clk_isr clk low"));
+
+    //while(ps2kbd_dev.read(&c)) ;
+    //result = 
+    if (ps2kbd_dev.read(&c)==0) {
+      keyboardcommand(c);  
+    } else {
+      ps2kbd_dev.write(PS2_KC_RESEND);
+      //kbd_write(PS2_KC_RESEND);
+    }
+    
+    //print_keyboard_state();
+    //Serial.println(result);
+    
+    
+
+  /*  
+  }
+  */
+  // enable pcint
+    enablePCINT(digitalPinToPCINT(ps2device_clock));
+  
+  
 }
 
 void set_dd5(byte n) {
@@ -218,11 +254,37 @@ void print_keyboard_state() {
   Serial.println("ps2kbd_send_enabled "+ String(ps2kbd_send_enabled) + ".");
 }
 
+char kbd_write(byte data) {
+  char result;
+  // disable pcint
+  disablePCINT(digitalPinToPCINT(ps2device_clock));
+  
+  lastSentByte = data;
+  result = ps2kbd_dev.write(lastSentByte);
+  
+  // enable pcint
+  enablePCINT(digitalPinToPCINT(ps2device_clock));
+  return result;
+}
+
 void loop() {
   byte state;
   char tmp;
   unsigned char c;
 
+  
+  
+  if (digitalRead(ps2device_clock)==LOW) {
+    Serial.println(F("ps2device_clock low"));
+  }
+
+  /*
+  if (digitalRead(ps2device_data) == LOW) {
+    Serial.println(F("ps2device_data low"));
+  }
+  */
+
+  /* 
   if( (digitalRead(ps2device_clock)==LOW) || (digitalRead(ps2device_data) == LOW))
   {
     while(ps2kbd_dev.read(&c)) ;
@@ -230,6 +292,9 @@ void loop() {
     print_keyboard_state();
   }
   else if (ps2kbd_send_enabled) {
+  */
+
+  if (ps2kbd_send_enabled) {
     for (byte dd5 = 0; dd5 < 6; dd5++) {
       set_dd5(dd5);
       for (byte dd3 = 0; dd3 < 16; dd3++) {
@@ -246,7 +311,7 @@ void loop() {
 
           tmp = scancodes2[dd5][dd3];
           if (tmp > 0) {
-            ps2kbd_dev.write(tmp);
+            kbd_write(tmp);
           }
           
           tmp = layout[dd5][dd3];
@@ -262,8 +327,8 @@ void loop() {
 
           tmp = scancodes2[dd5][dd3];
           if (tmp > 0) {
-            ps2kbd_dev.write(PS2_KC_KEYBREAK);
-            ps2kbd_dev.write(tmp);
+            kbd_write(PS2_KC_KEYBREAK);
+            kbd_write(tmp);
           }
           
 
@@ -283,7 +348,7 @@ void loop() {
         updateLeds();
       }
     }
-    
+   
   }
 
   
